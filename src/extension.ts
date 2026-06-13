@@ -219,11 +219,19 @@ async function updateStatusBar() {
             parts.push(`${bar} ${currentState.contextPercent}%`);
         }
 
-        // 工具活动
+        // 工具活动（改进：只显示正在运行的工具 + 具体命令）
         if (config.showTools && currentState.tools.length > 0) {
             const activeTools = currentState.tools.filter(t => t.status === 'running');
             if (activeTools.length > 0) {
-                parts.push(`$(sync~spin) ${activeTools.map(t => t.name).join(', ')}`);
+                const toolInfo = activeTools.map(t => {
+                    if (t.file) {
+                        // 如果有文件路径，显示文件名
+                        const fileName = t.file.split('/').pop() || t.file.split('\\').pop() || t.file;
+                        return `${t.name}: ${fileName}`;
+                    }
+                    return t.name;
+                }).join(' | ');
+                parts.push(`$(sync~spin) ${toolInfo}`);
             }
         }
 
