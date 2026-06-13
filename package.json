@@ -2,7 +2,7 @@
   "name": "trae-claude-hud",
   "displayName": "Claude HUD for Trae",
   "description": "Real-time Claude Code status display for Trae IDE",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "local",
   "engines": {
     "vscode": "^1.80.0"
@@ -57,6 +57,16 @@
           "type": "boolean",
           "default": true,
           "description": "Show todo progress"
+        },
+        "claudeHud.enablePrecisionStats": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable precision statistics logging"
+        },
+        "claudeHud.enableIncrementalRead": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable incremental file reading for better performance"
         }
       }
     }

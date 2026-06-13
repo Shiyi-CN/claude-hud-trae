@@ -41,6 +41,17 @@ interface TodoItem {
     completed: boolean;
 }
 
+// 精度统计
+interface PrecisionStats {
+    parseSuccess: number;
+    parseFailed: number;
+    lastParseTime: Date | null;
+    lastTokenCount: number;
+    lastContextPercent: number;
+    fileReadCount: number;
+    incrementalReads: number;
+}
+
 // 当前状态
 let currentState: HudState = {
     model: 'Unknown',
@@ -54,6 +65,21 @@ let currentState: HudState = {
     sessionDuration: ''
 };
 
+// 精度统计
+let precisionStats: PrecisionStats = {
+    parseSuccess: 0,
+    parseFailed: 0,
+    lastParseTime: null,
+    lastTokenCount: 0,
+    lastContextPercent: 0,
+    fileReadCount: 0,
+    incrementalReads: 0
+};
+
+// 增量读取状态
+let lastLineCount = 0;
+let lastTranscriptPath: string | null = null;
+
 // 配置
 let config = {
     enabled: true,
@@ -61,7 +87,24 @@ let config = {
     showContextBar: true,
     showTools: true,
     showAgents: true,
-    showTodos: true
+    showTodos: true,
+    enablePrecisionStats: true,
+    enableIncrementalRead: true
+};
+
+// 模型上下文窗口大小映射
+const MODEL_CONTEXT_WINDOWS: { [key: string]: number } = {
+    'opus': 200000,
+    'sonnet': 200000,
+    'haiku': 100000,
+    'claude-3-opus': 200000,
+    'claude-3-sonnet': 200000,
+    'claude-3-haiku': 100000,
+    'claude-3-5-sonnet': 200000,
+    'claude-3-5-haiku': 100000,
+    'mimo-v2.5-pro': 200000,
+    'mimo-v2.5': 200000,
+    'default': 200000
 };
 
 export function activate(context: vscode.ExtensionContext) {
@@ -112,6 +155,19 @@ function loadConfig() {
     config.showTools = cfg.get('showTools', true);
     config.showAgents = cfg.get('showAgents', true);
     config.showTodos = cfg.get('showTodos', true);
+    config.enablePrecisionStats = cfg.get('enablePrecisionStats', true);
+    config.enableIncrementalRead = cfg.get('enableIncrementalRead', true);
+}
+
+// 动态获取上下文窗口大小
+function getContextWindowSize(model: string): number {
+    const modelLower = model.toLowerCase();
+    for (const [key, size] of Object.entries(MODEL_CONTEXT_WINDOWS)) {
+        if (modelLower.includes(key.toLowerCase())) {
+            return size;
+        }
+    }
+    return MODEL_CONTEXT_WINDOWS['default'];
 }
 
 function startUpdateTimer() {
@@ -221,10 +277,31 @@ async function readTranscript() {
             return;
         }
 
-        const content = fs.readFileSync(transcriptPath, 'utf-8');
-        const lines = content.split('\n').filter(line => line.trim());
+        // 增量读取优化
+        let lines: string[];
+        if (config.enableIncrementalRead && lastTranscriptPath === transcriptPath) {
+            const content = fs.readFileSync(transcriptPath, 'utf-8');
+            const allLines = content.split('\n').filter(line => line.trim());
 
-        outputChannel.appendLine(`Read ${lines.length} lines from transcript`);
+            // 只读取新增的行
+            if (allLines.length > lastLineCount) {
+                lines = allLines.slice(lastLineCount);
+                lastLineCount = allLines.length;
+                precisionStats.incrementalReads++;
+                outputChannel.appendLine(`Incremental read: ${lines.length} new lines`);
+            } else {
+                outputChannel.appendLine(`No new lines to read`);
+                return;
+            }
+        } else {
+            // 首次读取或文件变化，读取全部
+            const content = fs.readFileSync(transcriptPath, 'utf-8');
+            lines = content.split('\n').filter(line => line.trim());
+            lastLineCount = lines.length;
+            lastTranscriptPath = transcriptPath;
+            precisionStats.fileReadCount++;
+            outputChannel.appendLine(`Full read: ${lines.length} lines`);
+        }
 
         // 从后向前搜索，找到最近的 assistant 类型行
         let foundAssistant = false;
@@ -235,9 +312,12 @@ async function readTranscript() {
                     outputChannel.appendLine(`Found assistant at line ${i}`);
                     parseTranscriptLine(data);
                     foundAssistant = true;
+                    precisionStats.parseSuccess++;
+                    precisionStats.lastParseTime = new Date();
                     break;
                 }
             } catch (error) {
+                precisionStats.parseFailed++;
                 continue;
             }
         }
@@ -249,14 +329,22 @@ async function readTranscript() {
                 const lastLine = lines[lines.length - 1];
                 const data = JSON.parse(lastLine);
                 parseTranscriptLine(data);
+                precisionStats.parseSuccess++;
             } catch (error) {
                 outputChannel.appendLine(`Error parsing last line: ${error}`);
+                precisionStats.parseFailed++;
             }
+        }
+
+        // 输出精度统计
+        if (config.enablePrecisionStats) {
+            outputChannel.appendLine(`Precision stats: success=${precisionStats.parseSuccess}, failed=${precisionStats.parseFailed}, fileReads=${precisionStats.fileReadCount}, incrementalReads=${precisionStats.incrementalReads}`);
         }
 
         outputChannel.appendLine(`Current state: model=${currentState.model}, context=${currentState.contextPercent}%`);
     } catch (error) {
         outputChannel.appendLine(`Error reading transcript: ${error}`);
+        precisionStats.parseFailed++;
     }
 }
 
@@ -373,14 +461,19 @@ function parseTranscriptLine(data: any) {
             const cacheCreateTokens = usage.cache_creation_input_tokens || 0;
             const totalTokens = inputTokens + cacheReadTokens + cacheCreateTokens;
 
-            // 假设上下文窗口大小（可以根据模型调整）
-            const contextWindowSize = 200000; // 200k tokens
+            // 动态获取上下文窗口大小
+            const contextWindowSize = getContextWindowSize(currentState.model);
 
             currentState.contextUsed = totalTokens;
             currentState.contextTotal = contextWindowSize;
             currentState.contextPercent = Math.round((totalTokens / contextWindowSize) * 100);
 
+            // 更新精度统计
+            precisionStats.lastTokenCount = totalTokens;
+            precisionStats.lastContextPercent = currentState.contextPercent;
+
             outputChannel.appendLine(`Tokens: input=${inputTokens}, cache_read=${cacheReadTokens}, total=${totalTokens}, percent=${currentState.contextPercent}%`);
+            outputChannel.appendLine(`Context window: ${contextWindowSize} (model: ${currentState.model})`);
         }
     }
 

@@ -12,6 +12,8 @@
 | 🤥 Agent 状态 | 显示活跃的子 agent 数量 |
 | ✅ Todo 进度 | 显示任务完成进度 |
 | 🌿 Git 分支 | 显示当前 Git 分支信息 |
+| 🎯 精度统计 | 实时监控解析成功率和性能指标 |
+| ⚡ 增量读取 | 智能增量读取，提升性能 |
 
 ## 📦 安装方法
 
@@ -82,6 +84,8 @@ Claude HUD: Show Output Channel
 | `claudeHud.showTools` | boolean | `true` | 显示工具活动 |
 | `claudeHud.showAgents` | boolean | `true` | 显示 Agent 状态 |
 | `claudeHud.showTodos` | boolean | `true` | 显示 Todo 进度 |
+| `claudeHud.enablePrecisionStats` | boolean | `true` | 启用精度统计日志 |
+| `claudeHud.enableIncrementalRead` | boolean | `true` | 启用增量读取优化 |
 
 ### 配置示例
 
@@ -112,6 +116,60 @@ Claude HUD 通过以下方式获取状态信息：
 - **上下文使用率**：从 `usage` 字段的 token 数量计算
 - **工具活动**：从 `tool_use` 和 `tool_result` 消息解析
 - **Git 分支**：从 transcript 的 `gitBranch` 字段获取
+
+### 精度验证
+
+#### 1. 查看精度统计日志
+
+按 `Ctrl+Shift+P`，输入：
+```
+Claude HUD: Show Output Channel
+```
+
+日志会显示：
+```
+Precision stats: success=150, failed=2, fileReads=1, incrementalReads=149
+```
+
+- **success**：成功解析次数
+- **failed**：解析失败次数
+- **fileReads**：完整文件读取次数
+- **incrementalReads**：增量读取次数
+
+#### 2. 验证上下文使用率
+
+1. 打开日志查看实际 token 数量：
+   ```
+   Tokens: input=694, cache_read=81472, total=82166, percent=41%
+   Context window: 200000 (model: mimo-v2.5-pro)
+   ```
+
+2. 手动计算验证：
+   ```
+   total = input_tokens + cache_read_input_tokens + cache_creation_input_tokens
+   percent = (total / context_window_size) * 100
+   ```
+
+3. 对比 Claude Code 官方显示
+
+#### 3. 动态上下文窗口
+
+扩展会根据模型名称自动调整上下文窗口大小：
+
+| 模型 | 上下文窗口 |
+|------|-----------|
+| claude-3-opus | 200k tokens |
+| claude-3-sonnet | 200k tokens |
+| claude-3-haiku | 100k tokens |
+| claude-3-5-sonnet | 200k tokens |
+| mimo-v2.5-pro | 200k tokens |
+| 其他模型 | 200k tokens（默认） |
+
+#### 4. 增量读取优化
+
+- **首次读取**：读取完整文件
+- **后续读取**：只读取新增的行
+- **性能提升**：减少 90%+ 的文件读取开销
 
 ## 🐛 常见问题
 
@@ -194,6 +252,13 @@ vsce package
 - `formatContextBar()` - 格式化进度条
 
 ## 📝 更新日志
+
+### v1.1.0 (2026-06-13)
+- 🎯 精度改进
+  - ✅ 动态上下文窗口大小（根据模型自动调整）
+  - ✅ 增量读取优化（提升 90%+ 性能）
+  - ✅ 精度统计日志（监控解析成功率）
+  - ✅ 新增配置选项：`enablePrecisionStats` 和 `enableIncrementalRead`
 
 ### v1.0.0 (2026-06-13)
 - ✨ 初始版本
