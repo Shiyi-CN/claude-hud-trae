@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Compiled output
+out/
+
+# VSIX package
+*.vsix
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# Build
+dist/
+build/
+
+# Cache
+.cache/
+*.tsbuildinfo

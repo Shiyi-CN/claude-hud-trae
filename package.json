@@ -1,0 +1,74 @@
+{
+  "name": "trae-claude-hud",
+  "displayName": "Claude HUD for Trae",
+  "description": "Real-time Claude Code status display for Trae IDE",
+  "version": "1.0.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "trae-claude-hud.toggle",
+        "title": "Claude HUD: Toggle Display"
+      },
+      {
+        "command": "trae-claude-hud.showOutput",
+        "title": "Claude HUD: Show Output Channel"
+      }
+    ],
+    "configuration": {
+      "title": "Claude HUD",
+      "properties": {
+        "claudeHud.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable Claude HUD"
+        },
+        "claudeHud.updateInterval": {
+          "type": "number",
+          "default": 1000,
+          "description": "Update interval in milliseconds"
+        },
+        "claudeHud.showContextBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show context usage bar"
+        },
+        "claudeHud.showTools": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show tool activity"
+        },
+        "claudeHud.showAgents": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show agent status"
+        },
+        "claudeHud.showTodos": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show todo progress"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0"
+  }
+}
