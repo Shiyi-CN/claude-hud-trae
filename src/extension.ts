@@ -79,6 +79,7 @@ let precisionStats: PrecisionStats = {
 // 增量读取状态
 let lastLineCount = 0;
 let lastTranscriptPath: string | null = null;
+let lastFileModified = 0;
 
 // 配置
 let config = {
@@ -284,6 +285,18 @@ async function readTranscript() {
             outputChannel.appendLine(`Transcript file not found: ${transcriptPath}`);
             return;
         }
+
+        // 检查文件是否变化
+        const stats = fs.statSync(transcriptPath);
+        const currentModified = stats.mtimeMs;
+
+        // 如果文件没有变化，跳过更新
+        if (lastTranscriptPath === transcriptPath && currentModified === lastFileModified) {
+            return;
+        }
+
+        // 更新文件修改时间
+        lastFileModified = currentModified;
 
         // 增量读取优化
         let lines: string[];
