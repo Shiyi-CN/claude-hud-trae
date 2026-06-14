@@ -81,7 +81,6 @@ let precisionStats: PrecisionStats = {
 let lastLineCount = 0;
 let lastTranscriptPath: string | null = null;
 let lastFileModified = 0;
-let lastSessionId: string | null = null;  // 保存上一次的会话 ID
 
 // 配置
 let config = {
@@ -205,17 +204,6 @@ function showOutput() {
 
 async function updateStatusBar() {
     try {
-        // 检查会话是否变化（对话切换检测）
-        const currentSessionId = findSessionId();
-        if (currentSessionId && currentSessionId !== lastSessionId) {
-            outputChannel.appendLine(`Session changed: ${lastSessionId} -> ${currentSessionId}`);
-            lastSessionId = currentSessionId;
-            // 重置增量读取状态
-            lastLineCount = 0;
-            lastTranscriptPath = null;
-            lastFileModified = 0;
-        }
-
         // 读取 transcript 文件
         const hasNewData = await readTranscript();
 
@@ -403,14 +391,8 @@ function findTranscriptPath(): string | null {
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd();
     const encodedCwd = cwd.replace(/[^a-zA-Z0-9]/g, '-').replace(/^-+|-+$/g, '');
 
-    // 获取当前会话 ID
-    const sessionId = findSessionId();
-
     // 可能的路径
     const possiblePaths = [
-        // 基于会话 ID 的路径（最可能）
-        path.join(homeDir, '.claude', 'projects', encodedCwd, `${sessionId}.jsonl`),
-        // 其他可能的路径
         path.join(homeDir, '.claude', 'projects', encodedCwd, 'latest.jsonl'),
         path.join(homeDir, '.claude', 'transcripts', 'latest.jsonl'),
         path.join(homeDir, '.config', 'claude', 'transcripts', 'latest.jsonl'),
@@ -420,7 +402,6 @@ function findTranscriptPath(): string | null {
     outputChannel.appendLine(`Searching for transcript in:`);
     outputChannel.appendLine(`  CWD: ${cwd}`);
     outputChannel.appendLine(`  Encoded CWD: ${encodedCwd}`);
-    outputChannel.appendLine(`  Session ID: ${sessionId}`);
 
     for (const p of possiblePaths) {
         const exists = fs.existsSync(p);
@@ -454,36 +435,6 @@ function findTranscriptPath(): string | null {
     }
 
     outputChannel.appendLine(`No transcript file found`);
-    return null;
-}
-
-function findSessionId(): string | null {
-    // 从 sessions 目录查找当前会话 ID
-    const homeDir = os.homedir();
-    const sessionsDir = path.join(homeDir, '.claude', 'sessions');
-
-    if (!fs.existsSync(sessionsDir)) {
-        return null;
-    }
-
-    try {
-        const files = fs.readdirSync(sessionsDir)
-            .filter(f => f.endsWith('.json'))
-            .map(f => ({
-                name: f,
-                content: fs.readFileSync(path.join(sessionsDir, f), 'utf-8'),
-                time: fs.statSync(path.join(sessionsDir, f)).mtimeMs
-            }))
-            .sort((a, b) => b.time - a.time);
-
-        if (files.length > 0) {
-            const sessionData = JSON.parse(files[0].content);
-            return sessionData.sessionId || null;
-        }
-    } catch (error) {
-        outputChannel.appendLine(`Error reading sessions dir: ${error}`);
-    }
-
     return null;
 }
 
