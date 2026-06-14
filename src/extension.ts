@@ -225,6 +225,17 @@ function showOutput() {
 
 async function updateStatusBar() {
     try {
+        // 检查工作区是否变化（窗口切换检测）
+        const currentWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+        if (currentWorkspace && currentWorkspace !== lastWorkspacePath) {
+            outputChannel.appendLine(`Workspace changed: ${lastWorkspacePath} -> ${currentWorkspace}`);
+            lastWorkspacePath = currentWorkspace;
+            // 重置增量读取状态
+            lastLineCount = 0;
+            lastTranscriptPath = null;
+            lastFileModified = 0;
+        }
+
         // 读取 transcript 文件
         const hasNewData = await readTranscript();
 
