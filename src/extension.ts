@@ -81,7 +81,7 @@ let precisionStats: PrecisionStats = {
 let lastLineCount = 0;
 let lastTranscriptPath: string | null = null;
 let lastFileModified = 0;
-let lastWorkspacePath: string | null = null;  // 保存上一次的工作区路径
+let lastSessionId: string | null = null;  // 保存上一次的会话 ID
 
 // 配置
 let config = {
@@ -140,28 +140,8 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // 监听工作区变化（窗口切换时）
-    context.subscriptions.push(
-        vscode.window.onDidChangeActiveTextEditor(() => {
-            const currentWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
-            if (currentWorkspace && currentWorkspace !== lastWorkspacePath) {
-                outputChannel.appendLine(`Workspace changed: ${lastWorkspacePath} -> ${currentWorkspace}`);
-                lastWorkspacePath = currentWorkspace;
-                // 重置增量读取状态
-                lastLineCount = 0;
-                lastTranscriptPath = null;
-                lastFileModified = 0;
-                // 立即更新状态栏
-                updateStatusBar();
-            }
-        })
-    );
-
     // 加载配置
     loadConfig();
-
-    // 初始化工作区路径
-    lastWorkspacePath = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || null;
 
     // 开始更新
     startUpdateTimer();
@@ -225,11 +205,11 @@ function showOutput() {
 
 async function updateStatusBar() {
     try {
-        // 检查工作区是否变化（窗口切换检测）
-        const currentWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
-        if (currentWorkspace && currentWorkspace !== lastWorkspacePath) {
-            outputChannel.appendLine(`Workspace changed: ${lastWorkspacePath} -> ${currentWorkspace}`);
-            lastWorkspacePath = currentWorkspace;
+        // 检查会话是否变化（对话切换检测）
+        const currentSessionId = findSessionId();
+        if (currentSessionId && currentSessionId !== lastSessionId) {
+            outputChannel.appendLine(`Session changed: ${lastSessionId} -> ${currentSessionId}`);
+            lastSessionId = currentSessionId;
             // 重置增量读取状态
             lastLineCount = 0;
             lastTranscriptPath = null;
