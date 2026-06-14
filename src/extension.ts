@@ -81,6 +81,11 @@ let precisionStats: PrecisionStats = {
 let lastLineCount = 0;
 let lastTranscriptPath: string | null = null;
 let lastFileModified = 0;
+let lastSessionId: string | null = null;  // [DEBUG] 跟踪 sessionId 变化
+
+// 持久化的显示上下文数据（最核心：只在有完整 usage 数据时更新，永不主动清空）
+// 显示层只用这个变量渲染进度条，和数据解析层完全解耦
+let displayContext: { percent: number; used: number; total: number } | null = null;
 
 // 配置
 let config = {
@@ -104,8 +109,8 @@ const MODEL_CONTEXT_WINDOWS: { [key: string]: number } = {
     'claude-3-haiku': 100000,
     'claude-3-5-sonnet': 200000,
     'claude-3-5-haiku': 100000,
-    'mimo-v2.5-pro': 200000,
-    'mimo-v2.5': 200000,
+    'mimo-v2.5-pro': 1000000,    // MiMo-V2.5-Pro: 1M 上下文窗口
+    'mimo-v2.5': 1000000,         // MiMo-V2.5: 1M 上下文窗口
     'default': 200000
 };
 
@@ -204,12 +209,16 @@ function showOutput() {
 
 async function updateStatusBar() {
     try {
-        // 读取 transcript 文件
-        const hasNewData = await readTranscript();
+        // [DEBUG] 记录更新前的 displayContext
+        const prevDisplayContext = displayContext ? { ...displayContext } : null;
+        const prevStatusBarText = statusBarItem.text;
 
-        // 如果没有新数据，保持当前显示不变
-        if (!hasNewData) {
-            return;
+        // 读取 transcript 文件（可能更新 currentState 和 displayContext）
+        await readTranscript();
+
+        // [DEBUG] 检查 readTranscript 是否意外清空了 displayContext
+        if (prevDisplayContext && !displayContext) {
+            outputChannel.appendLine(`[CRITICAL] displayContext was CLEARED during readTranscript! prev=${JSON.stringify(prevDisplayContext)}`);
         }
 
         // 构建状态栏文本
@@ -220,11 +229,16 @@ async function updateStatusBar() {
             parts.push(`[${currentState.model}]`);
         }
 
-        // 上下文使用率
-        if (config.showContextBar && currentState.contextTotal > 0) {
-            const bar = formatContextBar(currentState.contextPercent);
-            parts.push(`${bar} ${currentState.contextPercent}%`);
+        // 上下文使用率 — 只用 displayContext，与 currentState 完全解耦
+        // displayContext 只在解析到完整 usage 数据时更新，永不主动清空
+        const contextBarAdded = config.showContextBar && displayContext !== null && displayContext.total > 0;
+        if (contextBarAdded && displayContext) {
+            const bar = formatContextBar(displayContext.percent);
+            parts.push(`${bar} ${displayContext.percent}%`);
         }
+
+        // [DEBUG] 详细记录进度条条件
+        outputChannel.appendLine(`[DEBUG-CTX] showContextBar=${config.showContextBar}, displayContext=${JSON.stringify(displayContext)}, contextBarAdded=${contextBarAdded}`);
 
         // 工具活动（改进：只显示正在运行的工具 + 具体命令）
         if (config.showTools && currentState.tools.length > 0) {
@@ -261,11 +275,31 @@ async function updateStatusBar() {
             parts.push(`$(git-branch) ${currentState.gitBranch}`);
         }
 
-        // 更新状态栏（只有有内容时才更新）
+        // 更新状态栏：新文本有内容则更新，否则保持上次显示
         const newText = parts.join(' │ ');
+
+        // [DEBUG] 记录 parts 构建结果
+        outputChannel.appendLine(`[DEBUG-PARTS] count=${parts.length}, newText="${newText.substring(0, 80)}", lastStatusBarText="${(lastStatusBarText || '').substring(0, 80)}"`);
+
         if (newText) {
             statusBarItem.text = newText;
             lastStatusBarText = newText;
+        } else if (lastStatusBarText) {
+            statusBarItem.text = lastStatusBarText;
+            outputChannel.appendLine(`[DEBUG] Kept lastStatusBarText (newText was empty)`);
+        } else if (displayContext) {
+            // 终极保底：一旦 displayContext 设置过，进度条永不消失
+            const safeText = `${formatContextBar(displayContext.percent)} ${displayContext.percent}%`;
+            statusBarItem.text = safeText;
+            lastStatusBarText = safeText;
+            outputChannel.appendLine(`[WARN] Used ultimate fallback: "${safeText}"`);
+        }
+
+        // [DEBUG] 检测进度条是否从有变无
+        const hadBar = prevStatusBarText.includes('█') || prevStatusBarText.includes('░');
+        const hasBar = statusBarItem.text.includes('█') || statusBarItem.text.includes('░');
+        if (hadBar && !hasBar) {
+            outputChannel.appendLine(`[CRITICAL] Progress bar DISAPPEARED! prev="${prevStatusBarText.substring(0, 80)}", curr="${statusBarItem.text.substring(0, 80)}"`);
         }
 
         // 输出详细信息
@@ -302,6 +336,11 @@ async function readTranscript(): Promise<boolean> {
         const stats = fs.statSync(transcriptPath);
         const currentModified = stats.mtimeMs;
 
+        // [DEBUG] 记录路径和修改时间变化
+        outputChannel.appendLine(`[DEBUG] readTranscript: path=${transcriptPath}`);
+        outputChannel.appendLine(`[DEBUG] readTranscript: lastPath=${lastTranscriptPath}, currentModified=${currentModified}, lastModified=${lastFileModified}`);
+        outputChannel.appendLine(`[DEBUG] readTranscript: pathChanged=${lastTranscriptPath !== transcriptPath}, mtimeChanged=${currentModified !== lastFileModified}`);
+
         // 如果文件没有变化，跳过更新
         if (lastTranscriptPath === transcriptPath && currentModified === lastFileModified) {
             return false;
@@ -335,6 +374,63 @@ async function readTranscript(): Promise<boolean> {
             precisionStats.fileReadCount++;
             outputChannel.appendLine(`Full read: ${lines.length} lines`);
         }
+
+        // [DEBUG] 输出文件结构：前 5 行的 type 字段
+        outputChannel.appendLine(`[DEBUG] === Transcript file structure (first 5 lines) ===`);
+        const previewLines = lines.slice(0, 5);
+        for (let i = 0; i < previewLines.length; i++) {
+            try {
+                const data = JSON.parse(previewLines[i]);
+                outputChannel.appendLine(`[DEBUG]   Line ${i}: type=${data.type}, sessionId=${data.sessionId || data.session_id || 'N/A'}, keys=${Object.keys(data).join(',')}`);
+            } catch {
+                outputChannel.appendLine(`[DEBUG]   Line ${i}: (parse error)`);
+            }
+        }
+
+        // [DEBUG] 输出文件结构：最后 5 行的 type 字段
+        outputChannel.appendLine(`[DEBUG] === Transcript file structure (last 5 lines) ===`);
+        const tailLines = lines.slice(-5);
+        for (let i = 0; i < tailLines.length; i++) {
+            const lineIdx = lines.length - 5 + i;
+            try {
+                const data = JSON.parse(tailLines[i]);
+                outputChannel.appendLine(`[DEBUG]   Line ${lineIdx}: type=${data.type}, sessionId=${data.sessionId || data.session_id || 'N/A'}, keys=${Object.keys(data).join(',')}`);
+            } catch {
+                outputChannel.appendLine(`[DEBUG]   Line ${lineIdx}: (parse error)`);
+            }
+        }
+
+        // [DEBUG] 检测 sessionId 变化（对话切换）
+        let currentSessionId: string | null = null;
+        for (let i = lines.length - 1; i >= 0; i--) {
+            try {
+                const data = JSON.parse(lines[i]);
+                const sid = data.sessionId || data.session_id || null;
+                if (sid) {
+                    currentSessionId = sid;
+                    break;
+                }
+            } catch { continue; }
+        }
+        outputChannel.appendLine(`[DEBUG] SessionId: current=${currentSessionId}, last=${lastSessionId}`);
+        if (lastSessionId !== null && currentSessionId !== null && currentSessionId !== lastSessionId) {
+            outputChannel.appendLine(`[DEBUG] *** SESSION CHANGED! ${lastSessionId} => ${currentSessionId} ***`);
+            // 切换对话只重置 model/tools/agents/todos/git — 但 displayContext 保持不变
+            // 这样进度条在切换期间不会闪烁或消失，等新对话的 usage 数据解析到后自动更新
+            currentState = {
+                model: 'Unknown',
+                contextPercent: displayContext?.percent || 0,
+                contextUsed: displayContext?.used || 0,
+                contextTotal: displayContext?.total || 0,
+                tools: [],
+                agents: [],
+                todos: [],
+                gitBranch: '',
+                sessionDuration: ''
+            };
+            outputChannel.appendLine(`[DEBUG] State reset due to session change (displayContext preserved: ${displayContext?.percent || 0}%)`);
+        }
+        lastSessionId = currentSessionId;
 
         // 从后向前搜索，找到最近的 assistant 类型行
         let foundAssistant = false;
@@ -384,57 +480,113 @@ async function readTranscript(): Promise<boolean> {
 }
 
 function findTranscriptPath(): string | null {
-    // Claude Code 的 transcript 文件路径
     const homeDir = os.homedir();
-
-    // 获取当前工作目录并编码
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd();
     const encodedCwd = cwd.replace(/[^a-zA-Z0-9]/g, '-').replace(/^-+|-+$/g, '');
 
-    // 可能的路径
-    const possiblePaths = [
-        path.join(homeDir, '.claude', 'projects', encodedCwd, 'latest.jsonl'),
-        path.join(homeDir, '.claude', 'transcripts', 'latest.jsonl'),
-        path.join(homeDir, '.config', 'claude', 'transcripts', 'latest.jsonl'),
-    ];
+    outputChannel.appendLine(`\n========== findTranscriptPath ==========`);
+    outputChannel.appendLine(`[DEBUG] CWD: ${cwd}`);
+    outputChannel.appendLine(`[DEBUG] Encoded CWD: ${encodedCwd}`);
 
-    // 添加调试信息
-    outputChannel.appendLine(`Searching for transcript in:`);
-    outputChannel.appendLine(`  CWD: ${cwd}`);
-    outputChannel.appendLine(`  Encoded CWD: ${encodedCwd}`);
+    // ===== 策略 1：通过 sessions/ 目录找到活跃进程的 sessionId =====
+    const sessionsDir = path.join(homeDir, '.claude', 'sessions');
+    outputChannel.appendLine(`[DEBUG] Sessions dir: ${sessionsDir}, exists: ${fs.existsSync(sessionsDir)}`);
 
-    for (const p of possiblePaths) {
-        const exists = fs.existsSync(p);
-        outputChannel.appendLine(`  ${p} - ${exists ? 'EXISTS' : 'not found'}`);
-        if (exists) {
-            outputChannel.appendLine(`Found transcript: ${p}`);
-            return p;
-        }
-    }
-
-    // 尝试查找最新的 transcript 文件
-    const projectsDir = path.join(homeDir, '.claude', 'projects', encodedCwd);
-    if (fs.existsSync(projectsDir)) {
-        outputChannel.appendLine(`Checking projects directory: ${projectsDir}`);
+    if (fs.existsSync(sessionsDir)) {
         try {
-            const files = fs.readdirSync(projectsDir)
-                .filter(f => f.endsWith('.jsonl') && !f.includes('subagents'))
-                .map(f => ({
-                    name: f,
-                    time: fs.statSync(path.join(projectsDir, f)).mtimeMs
-                }))
-                .sort((a, b) => b.time - a.time);
-            if (files.length > 0) {
-                const latest = path.join(projectsDir, files[0].name);
-                outputChannel.appendLine(`Found latest transcript: ${latest}`);
-                return latest;
+            const sessionFiles = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
+            outputChannel.appendLine(`[DEBUG] Session files: ${sessionFiles.join(', ')}`);
+
+            // 收集所有活跃 session，匹配当前 cwd
+            const activeSessions: Array<{ pid: number; sessionId: string; cwd: string; startedAt: number }> = [];
+            for (const sf of sessionFiles) {
+                try {
+                    const content = fs.readFileSync(path.join(sessionsDir, sf), 'utf-8');
+                    const data = JSON.parse(content);
+                    outputChannel.appendLine(`[DEBUG]   ${sf}: sessionId=${data.sessionId}, cwd=${data.cwd}, pid=${data.pid}, startedAt=${data.startedAt}`);
+                    activeSessions.push({
+                        pid: data.pid,
+                        sessionId: data.sessionId,
+                        cwd: data.cwd,
+                        startedAt: data.startedAt
+                    });
+                } catch (e) {
+                    outputChannel.appendLine(`[DEBUG]   ${sf}: parse error`);
+                }
+            }
+
+            // 过滤匹配当前 cwd 的 session，收集其 transcript 路径和 mtime
+            const matchedSessions = activeSessions
+                .filter(s => {
+                    const sessionEncodedCwd = s.cwd.replace(/[^a-zA-Z0-9]/g, '-').replace(/^-+|-+$/g, '');
+                    return sessionEncodedCwd === encodedCwd;
+                });
+
+            // 按 transcript 文件的 mtime 降序排列（最近被写入的 = 用户正在交互的）
+            const sessionWithMtime = matchedSessions
+                .map(s => {
+                    const transcriptPath = path.join(homeDir, '.claude', 'projects', encodedCwd, `${s.sessionId}.jsonl`);
+                    let mtimeMs = 0;
+                    let exists = false;
+                    try {
+                        if (fs.existsSync(transcriptPath)) {
+                            mtimeMs = fs.statSync(transcriptPath).mtimeMs;
+                            exists = true;
+                        }
+                    } catch { /* ignore */ }
+                    return { ...s, transcriptPath, mtimeMs, exists };
+                })
+                .filter(s => s.exists)
+                .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+            outputChannel.appendLine(`[DEBUG] Matched sessions for cwd (${sessionWithMtime.length}):`);
+            for (const s of sessionWithMtime) {
+                outputChannel.appendLine(`[DEBUG]   sessionId=${s.sessionId}, pid=${s.pid}, mtimeMs=${s.mtimeMs}`);
+            }
+
+            // 选择 mtime 最大的 transcript（最近被写入的）
+            if (sessionWithMtime.length > 0) {
+                const best = sessionWithMtime[0];
+                outputChannel.appendLine(`[DEBUG] Found transcript via session (most recent mtime): ${best.transcriptPath} (sessionId=${best.sessionId})`);
+                return best.transcriptPath;
             }
         } catch (error) {
-            outputChannel.appendLine(`Error reading projects dir: ${error}`);
+            outputChannel.appendLine(`[DEBUG] Error reading sessions dir: ${error}`);
         }
     }
 
-    outputChannel.appendLine(`No transcript file found`);
+    // ===== 策略 2：回退到按 mtime 查找最新的 transcript =====
+    outputChannel.appendLine(`[DEBUG] Falling back to mtime-based search`);
+    const projectsDir = path.join(homeDir, '.claude', 'projects', encodedCwd);
+    outputChannel.appendLine(`[DEBUG] Projects dir: ${projectsDir}, exists: ${fs.existsSync(projectsDir)}`);
+
+    if (fs.existsSync(projectsDir)) {
+        try {
+            const allFiles = fs.readdirSync(projectsDir);
+            const jsonlFiles = allFiles
+                .filter(f => f.endsWith('.jsonl') && !f.includes('subagents'))
+                .map(f => {
+                    const filePath = path.join(projectsDir, f);
+                    const stat = fs.statSync(filePath);
+                    return { name: f, path: filePath, size: stat.size, mtimeMs: stat.mtimeMs };
+                })
+                .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+            outputChannel.appendLine(`[DEBUG] .jsonl files (sorted by mtime desc):`);
+            for (const f of jsonlFiles) {
+                outputChannel.appendLine(`[DEBUG]   ${f.name} | size=${f.size} | mtimeMs=${f.mtimeMs}`);
+            }
+
+            if (jsonlFiles.length > 0) {
+                outputChannel.appendLine(`[DEBUG] Selected latest by mtime: ${jsonlFiles[0].path}`);
+                return jsonlFiles[0].path;
+            }
+        } catch (error) {
+            outputChannel.appendLine(`[DEBUG] Error reading projects dir: ${error}`);
+        }
+    }
+
+    outputChannel.appendLine(`[DEBUG] No transcript file found`);
     return null;
 }
 
@@ -465,6 +617,18 @@ function parseTranscriptLine(data: any) {
             currentState.contextUsed = totalTokens;
             currentState.contextTotal = contextWindowSize;
             currentState.contextPercent = Math.round((totalTokens / contextWindowSize) * 100);
+
+            // 只在有实际 token 数据时才更新 displayContext
+            // 生成内容过程中可能出现 usage 存在但 token 为 0 的情况，此时不应覆盖已有数据
+            if (totalTokens > 0) {
+                displayContext = {
+                    percent: currentState.contextPercent,
+                    used: currentState.contextUsed,
+                    total: currentState.contextTotal
+                };
+            } else {
+                outputChannel.appendLine(`[DEBUG] Skipped displayContext update: totalTokens=0 (keeping previous displayContext)`);
+            }
 
             // 更新精度统计
             precisionStats.lastTokenCount = totalTokens;
