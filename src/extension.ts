@@ -205,7 +205,12 @@ function showOutput() {
 async function updateStatusBar() {
     try {
         // 读取 transcript 文件
-        await readTranscript();
+        const hasNewData = await readTranscript();
+
+        // 如果没有新数据，保持当前显示不变
+        if (!hasNewData) {
+            return;
+        }
 
         // 构建状态栏文本
         const parts: string[] = [];
@@ -256,14 +261,11 @@ async function updateStatusBar() {
             parts.push(`$(git-branch) ${currentState.gitBranch}`);
         }
 
-        // 更新状态栏（只有有内容时才更新，避免空白）
+        // 更新状态栏（只有有内容时才更新）
         const newText = parts.join(' │ ');
         if (newText) {
             statusBarItem.text = newText;
             lastStatusBarText = newText;
-        } else {
-            // 如果没有新数据，保持上一次的显示
-            statusBarItem.text = lastStatusBarText;
         }
 
         // 输出详细信息
@@ -282,18 +284,18 @@ function formatContextBar(percent: number): string {
     return '█'.repeat(filled) + '░'.repeat(empty);
 }
 
-async function readTranscript() {
+async function readTranscript(): Promise<boolean> {
     // 尝试查找 Claude Code 的 transcript 文件
     const transcriptPath = findTranscriptPath();
     if (!transcriptPath) {
         outputChannel.appendLine(`No transcript path found`);
-        return;
+        return false;
     }
 
     try {
         if (!fs.existsSync(transcriptPath)) {
             outputChannel.appendLine(`Transcript file not found: ${transcriptPath}`);
-            return;
+            return false;
         }
 
         // 检查文件是否变化
@@ -302,7 +304,7 @@ async function readTranscript() {
 
         // 如果文件没有变化，跳过更新
         if (lastTranscriptPath === transcriptPath && currentModified === lastFileModified) {
-            return;
+            return false;
         }
 
         // 更新文件修改时间
@@ -322,7 +324,7 @@ async function readTranscript() {
                 outputChannel.appendLine(`Incremental read: ${lines.length} new lines`);
             } else {
                 outputChannel.appendLine(`No new lines to read`);
-                return;
+                return false;
             }
         } else {
             // 首次读取或文件变化，读取全部
@@ -373,9 +375,11 @@ async function readTranscript() {
         }
 
         outputChannel.appendLine(`Current state: model=${currentState.model}, context=${currentState.contextPercent}%`);
+        return true;
     } catch (error) {
         outputChannel.appendLine(`Error reading transcript: ${error}`);
         precisionStats.parseFailed++;
+        return false;
     }
 }
 
