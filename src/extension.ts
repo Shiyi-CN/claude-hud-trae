@@ -7,6 +7,7 @@ import * as os from 'os';
 let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
 let updateTimer: NodeJS.Timeout | undefined;
+let lastStatusBarText = '$(pulse) Claude HUD';  // 保存上一次的状态栏文本
 
 // 状态数据
 interface HudState {
@@ -210,7 +211,7 @@ async function updateStatusBar() {
         const parts: string[] = [];
 
         // 模型信息
-        if (currentState.model) {
+        if (currentState.model && currentState.model !== 'Unknown') {
             parts.push(`[${currentState.model}]`);
         }
 
@@ -255,14 +256,23 @@ async function updateStatusBar() {
             parts.push(`$(git-branch) ${currentState.gitBranch}`);
         }
 
-        // 更新状态栏
-        statusBarItem.text = parts.join(' │ ') || '$(pulse) Claude HUD';
+        // 更新状态栏（只有有内容时才更新，避免空白）
+        const newText = parts.join(' │ ');
+        if (newText) {
+            statusBarItem.text = newText;
+            lastStatusBarText = newText;
+        } else {
+            // 如果没有新数据，保持上一次的显示
+            statusBarItem.text = lastStatusBarText;
+        }
 
         // 输出详细信息
         outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${statusBarItem.text}`);
 
     } catch (error) {
         outputChannel.appendLine(`Error: ${error}`);
+        // 出错时保持上一次的显示
+        statusBarItem.text = lastStatusBarText;
     }
 }
 
