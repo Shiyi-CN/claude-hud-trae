@@ -100,7 +100,9 @@ let config = {
 };
 
 // 模型上下文窗口大小映射
+// 模型上下文窗口大小映射
 const MODEL_CONTEXT_WINDOWS: { [key: string]: number } = {
+    // Claude 系列
     'opus': 200000,
     'sonnet': 200000,
     'haiku': 100000,
@@ -109,8 +111,67 @@ const MODEL_CONTEXT_WINDOWS: { [key: string]: number } = {
     'claude-3-haiku': 100000,
     'claude-3-5-sonnet': 200000,
     'claude-3-5-haiku': 100000,
-    'mimo-v2.5-pro': 1000000,    // MiMo-V2.5-Pro: 1M 上下文窗口
-    'mimo-v2.5': 1000000,         // MiMo-V2.5: 1M 上下文窗口
+    'claude-4': 200000,
+
+    // MiMo 系列
+    'mimo-v2.5-pro': 1000000,
+    'mimo-v2.5': 1000000,
+
+    // 通义千问 (Qwen) - 阿里巴巴
+    'qwen3': 128000,
+    'qwen3-coder': 128000,
+    'qwen2.5': 128000,
+    'qwen2.5-coder': 128000,
+    'qwen-turbo': 128000,
+    'qwen-plus': 128000,
+    'qwen-max': 128000,
+    'qwen-max-1201': 128000,
+    'qwen-max-longcontext': 1000000,
+    'qwen-long': 1000000,
+
+    // DeepSeek - 深度求索
+    'deepseek-v3': 128000,
+    'deepseek-r1': 128000,
+    'deepseek-r1-0528': 128000,
+    'deepseek-chat': 128000,
+    'deepseek-coder': 128000,
+    'deepseek-coder-v2': 128000,
+
+    // 智谱清言 (GLM) - 智谱AI
+    'glm-4': 128000,
+    'glm-4-plus': 128000,
+    'glm-4-long': 1000000,
+    'glm-4-flash': 128000,
+    'glm-z1': 128000,
+    'glm-3': 8192,
+    'glm-3-turbo': 8192,
+
+    // 月之暗面 (Moonshot/Kimi)
+    'moonshot-v1-8k': 8192,
+    'moonshot-v1-32k': 32768,
+    'moonshot-v1-128k': 131072,
+    'kimi': 128000,
+    'kimi-k2': 128000,
+
+    // 讯飞星火 (Spark)
+    'spark-max': 8192,
+    'spark-pro': 8192,
+    'spark-lite': 8192,
+
+    // 文心一言 (ERNIE) - 百度
+    'ernie-4.0': 8192,
+    'ernie-3.5': 8192,
+    'ernie-speed': 8192,
+
+    // 百川 (Baichuan)
+    'baichuan2': 4096,
+    'baichuan2-turbo': 8192,
+
+    // MiniMax
+    'abab6': 8192,
+    'abab6.5': 8192,
+
+    // 默认值
     'default': 200000
 };
 
